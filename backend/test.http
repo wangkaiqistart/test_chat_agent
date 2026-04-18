@@ -1,0 +1,37 @@
+### 健康检查
+GET http://localhost:8000/api/health
+
+---
+
+### 流式对话
+POST http://localhost:8000/api/chat
+Content-Type: application/json
+
+{
+  "session_id": "test-session-001",
+  "message": "你好，介绍一下你自己",
+  "stream_mode": "messages"
+}
+
+
+### 非流式对话
+POST http://localhost:8000/api/chat
+Content-Type: application/json
+
+{
+  "session_id": "test-session-001",
+  "message": "你好",
+  "stream_mode": "default"
+}
+
+
+### Human-in-the-loop 命令接口（Phase 1 暂未实现）
+POST http://localhost:8000/api/chat/command
+Content-Type: application/json
+
+{
+  "session_id": "test-session-001",
+  "command": {
+    "action": "continue"
+  }
+}

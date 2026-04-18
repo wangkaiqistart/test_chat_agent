@@ -9,6 +9,8 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from langchain.chat_models import init_chat_model
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -16,6 +18,23 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from typing import TypedDict, Annotated
 import operator
+# 2. 配置速率限制器
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=5,       # 每秒最多5个请求
+    check_every_n_seconds=1.0    # 每1秒检查一次是否超过速率限制
+)
+temperature=0.7
+max_tokens=10000
+llm = init_chat_model(
+    base_url='https://xiaoai.plus/v1',
+    api_key='sk-3FbwACzC2vTkQOXR96N7h3upBBGf6UvwCMsGJa7u1hJzKPGu',
+    model_provider='openai',
+    model='gpt-4o-mini',
+    # rate_limiter= rate_limiter,
+    temperature=temperature,  # 温度参数，用于控制模型的随机性，值越小则随机性越小
+    max_tokens=max_tokens,  # 最大生成token数
+
+)
 
 
 # ============ LangGraph State ============
@@ -31,7 +50,7 @@ def build_graph():
 
     def llm_node(state: AgentState) -> AgentState:
         """LLM 节点：简单 echo 回复"""
-        llm = ChatOpenAI(model="gpt-4o-mini", streaming=True)
+
         response = llm.invoke(state["messages"])
         return {"messages": [response]}
 
@@ -53,6 +72,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     stream_mode: str = "messages"
+
 
 
 class CommandRequest(BaseModel):
@@ -120,8 +140,9 @@ async def chat(request: ChatRequest):
                 config=config,
                 stream_mode="messages"
             ):
-                # chunk 格式: AIMessage chunk 或 ToolMessage chunk
-                content = getattr(chunk, "content", "")
+                # chunk 格式: (AIMessageChunk, metadata) 元组
+                message_chunk = chunk[0] if isinstance(chunk, tuple) else chunk
+                content = getattr(message_chunk, "content", "")
                 if content:
                     yield format_sse_event("token", {"content": content})
         else:

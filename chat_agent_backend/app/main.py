@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.graph import build_graph
+from app import session as session_db
 
 
 # ============ API Models ============
@@ -28,6 +29,14 @@ class ChatRequest(BaseModel):
 class CommandRequest(BaseModel):
     session_id: str
     command: dict
+
+
+class CreateSessionRequest(BaseModel):
+    title: str = "新会话"
+
+
+class UpdateTitleRequest(BaseModel):
+    title: str
 
 
 # ============ FastAPI App ============
@@ -48,6 +57,8 @@ async def lifespan(app: FastAPI):
                 app.state.graph = build_graph(checkpointer=cp, store=s)
                 print("✅ MySQL Checkpointer 初始化成功")
                 print("✅ MySQL Store 初始化成功")
+                session_db.init_session_table()
+                print("✅ 会话表初始化成功")
                 print("🚀 Backend Phase 1 启动成功 — Tool Calling enabled")
                 yield
         print("👋 Backend 关闭")
@@ -93,6 +104,59 @@ async def health():
     return {"status": "ok", "version": "0.1.0", "phase": "phase1"}
 
 
+# ============ 会话管理 API ============
+@app.get("/api/sessions")
+async def list_sessions(limit: int = 50, offset: int = 0):
+    """获取会话列表（按修改时间倒序）"""
+    sessions = session_db.list_sessions(limit=limit, offset=offset)
+    return {"sessions": sessions, "total": len(sessions)}
+
+
+@app.post("/api/sessions")
+async def create_session(req: CreateSessionRequest):
+    """创建新会话"""
+    import uuid
+    session_id = f"session_{uuid.uuid4().hex[:12]}"
+    new_session = session_db.create_session(session_id, req.title)
+    return {"session": new_session}
+
+
+@app.get("/api/sessions/latest")
+async def get_latest_session():
+    """获取最后一次更新的会话"""
+    latest = session_db.get_latest_session()
+    if latest:
+        return {"session": latest}
+    return {"session": None}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    """获取单个会话"""
+    sess = session_db.get_session(session_id)
+    if sess:
+        return {"session": sess}
+    return JSONResponse(status_code=404, content={"error": "会话不存在"})
+
+
+@app.patch("/api/sessions/{session_id}/title")
+async def update_session_title(session_id: str, req: UpdateTitleRequest):
+    """更新会话标题"""
+    updated = session_db.update_session_title(session_id, req.title)
+    if updated:
+        return {"session": updated}
+    return JSONResponse(status_code=404, content={"error": "会话不存在"})
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除会话"""
+    success = session_db.delete_session(session_id)
+    if success:
+        return {"status": "ok"}
+    return JSONResponse(status_code=404, content={"error": "会话不存在"})
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """
@@ -105,6 +169,12 @@ async def chat(request: ChatRequest, http_request: Request):
     async def event_generator():
         from langchain_core.messages import HumanMessage
         messages = [HumanMessage(content=request.message)]
+
+        # 确保会话存在
+        session_db.create_session(request.session_id, "新会话")
+
+        # 更新会话的最后消息
+        session_db.update_session_message(request.session_id, request.message)
 
         if request.stream_mode == "messages":
             async for event in graph.astream_events(

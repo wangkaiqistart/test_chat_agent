@@ -29,6 +29,7 @@ export default function App() {
     activeConversationKey,
     setActiveConversationKey,
     addConversation,
+    removeConversation,
   } = useXConversations({
     defaultConversations: [],
   });
@@ -104,6 +105,8 @@ export default function App() {
   const handleDeleteConversation = async (key: string) => {
     try {
       await deleteSession(key);
+      // 从前端会话列表移除
+      removeConversation(key);
       // 激活其他会话或创建新会话
       if (activeConversationKey === key) {
         const remaining = conversations.filter((c) => c.key !== key);

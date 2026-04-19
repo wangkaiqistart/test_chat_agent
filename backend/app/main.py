@@ -3,10 +3,11 @@ FastAPI 应用入口
 Phase 1: LangGraph 状态机 + Tool Calling + SSE 流式输出
 """
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from langchain.chat_models import init_chat_model
@@ -18,6 +19,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from typing import TypedDict, Annotated
 import operator
+
+# MySQL Checkpointer (Lane B)
+from .checkpointer import get_checkpointer
 
 # ============ LLM 配置 ============
 rate_limiter = InMemoryRateLimiter(
@@ -54,7 +58,7 @@ def get_available_tools():
 
 
 # ============ LangGraph 3 节点 ReAct 图 ============
-def build_graph():
+def build_graph(checkpointer=None):
     """构建 Phase 1 多节点 LangGraph — Tool Calling + Summarize"""
     graph = StateGraph(AgentState)
     tools = get_available_tools()
@@ -175,13 +179,11 @@ def build_graph():
     # 边：llm_summarize → END
     graph.add_edge("llm_summarize", END)
 
-    # 使用内存 Checkpointer（Phase 1 暂用，Phase 2 切换 MySQL）
-    checkpointer = MemorySaver()
-    return graph.compile(checkpointer=checkpointer)
-
-
-# 全局 graph 实例
-graph = build_graph()
+    # 使用 Checkpointer（通过 checkpointer.py 统一管理）
+    # 默认 MemorySaver，通过 USE_MYSQL_CHECKPOINTER=true 切换到 MySQL
+    # checkpointer 由 lifespan 异步创建后传入
+    actual_checkpointer = checkpointer if checkpointer is not None else get_checkpointer()
+    return graph.compile(checkpointer=actual_checkpointer)
 
 
 # ============ API Models ============
@@ -199,8 +201,25 @@ class CommandRequest(BaseModel):
 # ============ FastAPI App ============
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """异步 lifespan — 在这里初始化 graph（因为需要 event loop）"""
+    # 检查是否启用 MySQL Checkpointer
+    use_mysql = os.environ.get("USE_MYSQL_CHECKPOINTER", "false").lower() == "true"
+
+    if use_mysql:
+        # MySQL Checkpointer 在 async context 中创建
+        checkpointer = await get_checkpointer()
+        print("✅ MySQL Checkpointer 初始化成功")
+    else:
+        # 开发环境使用 MemorySaver
+        checkpointer = MemorySaver()
+        print("⚠️  使用 MemorySaver（Phase 2 切换到 MySQL）")
+
+    # 在 async context 中构建 graph（传入 checkpointer）
+    app.state.graph = build_graph(checkpointer=checkpointer)
     print("🚀 Backend Phase 1 启动成功 — Tool Calling enabled")
+
     yield
+
     print("👋 Backend 关闭")
 
 
@@ -235,11 +254,13 @@ async def health():
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, http_request: Request):
     """
     流式对话接口 — Phase 1
     支持 Tool Calling，通过 SSE 输出 token
     """
+    # 从 app.state 获取 graph 实例
+    graph = http_request.app.state.graph
     config = {"configurable": {"thread_id": request.session_id}}
 
     async def event_generator():

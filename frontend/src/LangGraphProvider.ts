@@ -13,8 +13,11 @@ import type { SSEOutput, TransformMessage, XRequestOptions } from '@ant-design/x
 
 // ============ 类型定义 ============
 
-/** 聊天消息（transformMessage 返回的类型） */
-export type LangGraphMessage = string;
+/** 聊天消息格式 */
+export interface LangGraphMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 /** 输入到 onRequest 的参数 */
 export interface LangGraphInput {
@@ -49,7 +52,10 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
   }
 
   transformLocalMessage(requestParams: Partial<LangGraphInput>): LangGraphMessage {
-    return requestParams.message || '';
+    return {
+      role: 'user',
+      content: requestParams.message || '',
+    };
   }
 
   transformMessage(info: TransformMessage<LangGraphMessage, ChatOutput>): LangGraphMessage {
@@ -57,14 +63,17 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
     const eventType = chunk?.event as string | undefined;
     const rawData = chunk?.data as string | undefined;
 
+    // 初始消息
+    let msg: LangGraphMessage = originMessage || { role: 'assistant', content: '' };
+
     // 非 SSE 事件或空数据
     if (!rawData) {
-      return originMessage || '';
+      return msg;
     }
 
     // done 事件：结束追踪
     if (eventType === 'done') {
-      return originMessage || '';
+      return msg;
     }
 
     try {
@@ -73,7 +82,11 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
       // ========== token 事件：累加文本内容 ==========
       if (eventType === 'token' || (!eventType && data.content !== undefined)) {
         const text = data.content || '';
-        return `${originMessage || ''}${text}`;
+        msg = {
+          role: 'assistant',
+          content: `${msg.content}${text}`,
+        };
+        return msg;
       }
 
       // ========== tool_start 事件：记录工具调用信息 ==========
@@ -83,7 +96,7 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
           args: data.input || '',
           results: [],
         };
-        return originMessage || '';
+        return msg;
       }
 
       // ========== tool_result 事件：追加到消息内容 ==========
@@ -96,13 +109,17 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
         }
 
         const toolResultText = `\n[${toolName}] 结果: ${toolOutput}\n`;
-        return `${originMessage || ''}${toolResultText}`;
+        msg = {
+          role: 'assistant',
+          content: `${msg.content}${toolResultText}`,
+        };
+        return msg;
       }
     } catch {
       // JSON 解析失败，忽略
     }
 
-    return originMessage || '';
+    return msg;
   }
 }
 

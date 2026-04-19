@@ -1,5 +1,5 @@
 /**
- * 聊天区域组件
+ * 聊天区域组件 - 多模态版本
  */
 import React, { useState, useRef, useEffect } from 'react';
 import { Bubble, Sender, ThoughtChain } from '@ant-design/x';
@@ -7,6 +7,9 @@ import { Flex, Avatar, Button, message } from 'antd';
 import {
   CopyOutlined,
   SyncOutlined,
+  PictureOutlined,
+  AudioOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons';
 
 import { PromptItem } from './prompts';
@@ -28,12 +31,22 @@ const COLORS = {
 };
 
 // ============ 类型定义 ============
+// 图片附件类型
+export interface ImageAttachment {
+  uid: string;
+  name: string;
+  url: string;
+  status: 'done' | 'uploading' | 'error';
+}
+
+// 消息类型（支持多模态）
 interface MessageItem {
   id: string;
   message: {
     role: 'user' | 'assistant';
     content: string;
     thoughts?: ToolCall[];
+    images?: ImageAttachment[];  // 图片附件
   };
   status?: string;
 }
@@ -198,6 +211,21 @@ const styles = {
     background: `linear-gradient(135deg, ${COLORS.accent}, #34d399)`,
     color: '#fff',
   },
+
+  // 图片预览
+  imagePreview: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    overflow: 'hidden',
+    border: `1px solid ${COLORS.border}`,
+  },
+
+  imagePreviewImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover' as const,
+  },
 };
 
 // ============ 组件 ============
@@ -210,7 +238,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   promptItems,
 }) => {
   const chatListRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [inputValue, setInputValue] = useState('');
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Web Speech API 语音识别
+  const recognitionRef = useRef<any>(null);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -219,11 +253,89 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   }, [messages]);
 
+  // 处理图片上传
+  const handleImageUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  // 处理文件选择
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newAttachments: ImageAttachment[] = Array.from(files).map((file) => ({
+      uid: Math.random().toString(36),
+      name: file.name,
+      url: URL.createObjectURL(file),
+      status: 'done' as const,
+    }));
+    setAttachments(newAttachments);
+    // 清空 input 以便重复选择同一文件
+    e.target.value = '';
+  };
+
+  // 处理语音输入
+  const handleVoiceInput = () => {
+    if (isRecording) {
+      // 停止录音
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsRecording(false);
+      return;
+    }
+
+    // 检查浏览器支持
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      message.error('当前浏览器不支持语音输入');
+      return;
+    }
+
+    // 启动语音识别
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'zh-CN';
+
+    recognition.onresult = (event: any) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInputValue(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+      if (event.error !== 'no-speech') {
+        message.error('语音识别出错');
+      }
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognition.start();
+    setIsRecording(true);
+    message.info('开始语音输入...');
+  };
+
   // 处理提交
   const handleSubmit = (val: string) => {
-    if (!val) return;
-    onSubmit(val);
+    // 如果有图片，将附件信息追加到消息内容
+    let messageContent = val;
+    if (attachments.length > 0) {
+      const imageNames = attachments.map(a => a.name).join(', ');
+      messageContent = `[图片: ${imageNames}]\n${val}`;
+    }
+    if (!messageContent) return;
+    onSubmit(messageContent);
     setInputValue('');
+    setAttachments([]);
   };
 
   // 处理快捷操作点击
@@ -369,16 +481,55 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
       </div>
 
-      {/* 输入区域 */}
+      {/* 输入区域 - 多模态 */}
       <div style={styles.senderWrap}>
+        {/* 隐藏的文件输入 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+        />
+
+        {/* 图片预览 */}
+        {attachments.length > 0 && (
+          <Flex gap={8} style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+            {attachments.map((att) => (
+              <div key={att.uid} style={styles.imagePreview}>
+                <img src={att.url} alt={att.name} style={styles.imagePreviewImg} />
+              </div>
+            ))}
+          </Flex>
+        )}
+
         <Sender
           value={inputValue}
           onSubmit={handleSubmit}
           onChange={setInputValue}
           onCancel={onCancel}
           loading={isRequesting}
-          placeholder="输入消息..."
+          placeholder="输入消息...（支持语音、图片）"
           style={styles.sender}
+          // 图片和语音按钮
+          prefix={
+            <Flex gap={4}>
+              <Button
+                type="text"
+                icon={<PictureOutlined />}
+                onClick={handleImageUpload}
+                disabled={isRequesting}
+              />
+              <Button
+                type="text"
+                icon={isRecording ? <LoadingOutlined /> : <AudioOutlined />}
+                onClick={handleVoiceInput}
+                disabled={isRequesting}
+                style={isRecording ? { color: COLORS.accent } : undefined}
+              />
+            </Flex>
+          }
         />
       </div>
     </>

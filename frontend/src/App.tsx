@@ -23,7 +23,7 @@ export default function App() {
 
   // 独立管理历史消息状态
   const [historyMessages, setHistoryMessages] = useState<any[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);  // 初始为 true，先显示加载效果
 
   const {
     conversations,

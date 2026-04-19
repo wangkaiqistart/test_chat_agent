@@ -5,8 +5,7 @@ Phase 1: 工具定义
 import os
 from typing import Optional
 
-# 检查 Tavily API key
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+
 
 
 def get_tavily_tool():
@@ -16,16 +15,17 @@ def get_tavily_tool():
     Returns:
         TavilySearchResults 工具实例，或 None（如果未配置 API key）
     """
-    if not TAVILY_API_KEY:
+    tavily_api_key = os.getenv("TAVILY_API_KEY")
+    if not tavily_api_key:
         print("⚠️  TAVILY_API_KEY 未设置，Web Search 工具将不可用")
         return None
 
-    from langchain_tavily import TavilySearchResults
+    from langchain_tavily import TavilySearch
 
     # 创建 Tavily 搜索工具，最大返回 5 个结果
-    tavily_tool = TavilySearchResults(
+    tavily_tool = TavilySearch(
         max_results=5,
-        api_key=TAVILY_API_KEY,
+        api_key=tavily_api_key,
         name="tavily_search",
         description="搜索互联网获取最新信息。当你需要查询实时数据、新闻、或不确定的信息时使用。",
     )

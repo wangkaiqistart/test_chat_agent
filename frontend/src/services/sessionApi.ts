@@ -15,12 +15,14 @@ export interface Session {
   message_count: number;
 }
 
-interface ListResponse {
-  sessions: Session[];
+// 历史消息
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
-interface SessionResponse {
-  session: Session;
+interface ListResponse {
+  sessions: Session[];
 }
 
 // 获取会话列表（按更新时间倒序）
@@ -30,43 +32,24 @@ export async function listSessions(): Promise<Session[]> {
   return data.sessions || [];
 }
 
-// 获取或创建默认会话（页面加载时调用）
-export async function getOrCreateDefaultSession(): Promise<Session> {
-  const res = await fetch(`${API_BASE}/sessions/default`);
-  const data: SessionResponse = await res.json();
-  return data.session;
-}
-
-// 获取单个会话
-export async function getSession(sessionId: string): Promise<Session | null> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
-  const data: SessionResponse = await res.json();
-  return data.session || null;
-}
-
-// 创建新会话
-export async function createSession(): Promise<Session> {
+// 创建新会话（返回会话信息 + 空历史）
+export async function createSession(): Promise<{ session: Session; messages: HistoryMessage[] }> {
   const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
-  const data: SessionResponse = await res.json();
-  return data.session;
+  const data = await res.json();
+  return { session: data.session, messages: data.messages || [] };
+}
+
+// 获取单个会话（带历史消息）
+export async function getSession(sessionId: string): Promise<{ session: Session; messages: HistoryMessage[] } | null> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
+  const data = await res.json();
+  if (!data.session) return null;
+  return { session: data.session, messages: data.messages || [] };
 }
 
 // 删除会话
 export async function deleteSession(sessionId: string): Promise<void> {
   await fetch(`${API_BASE}/sessions/${sessionId}`, { method: 'DELETE' });
-}
-
-// 历史消息
-export interface HistoryMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-// 获取会话历史消息
-export async function getSessionHistory(sessionId: string): Promise<HistoryMessage[]> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/history`);
-  const data = await res.json();
-  return data.messages || [];
 }
 
 // 转换 Session 为 ConversationData 格式

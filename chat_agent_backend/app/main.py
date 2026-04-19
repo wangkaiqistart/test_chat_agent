@@ -88,28 +88,51 @@ async def list_sessions(user_id: int = DEFAULT_USER_ID):
 
 
 @app.post("/api/sessions")
-async def create_session(user_id: int = DEFAULT_USER_ID):
-    """创建新会话"""
+async def create_or_get_session(user_id: int = DEFAULT_USER_ID):
+    """创建新会话 或 获取默认会话（带历史消息）"""
     import uuid
     session_id = f"session_{uuid.uuid4().hex[:12]}"
     new_session = session_db.create_session(session_id, user_id, "新会话")
-    return {"session": new_session}
 
+    # 获取历史消息
+    graph = app.state.graph
+    config = {"configurable": {"thread_id": session_id}}
+    history = []
+    try:
+        state = await graph.aget_state(config)
+        if state and "messages" in state:
+            for msg in state["messages"]:
+                role = "user" if getattr(msg, "type", "") == "human" else "assistant"
+                content = getattr(msg, "content", "")
+                history.append({"role": role, "content": content})
+    except:
+        pass
 
-@app.get("/api/sessions/default")
-async def get_or_create_default_session(user_id: int = DEFAULT_USER_ID):
-    """获取或创建默认会话（新用户进入页面时调用）"""
-    session = session_db.get_or_create_default_session(user_id)
-    return {"session": session}
+    return {"session": new_session, "messages": history}
 
 
 @app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str):
-    """获取单个会话详情"""
+async def get_session_with_history(session_id: str, http_request: Request):
+    """获取单个会话详情（带聊天记录）"""
     sess = session_db.get_session(session_id)
-    if sess:
-        return {"session": sess}
-    return JSONResponse(status_code=404, content={"error": "会话不存在"})
+    if not sess:
+        return JSONResponse(status_code=404, content={"error": "会话不存在"})
+
+    # 获取历史消息
+    graph = http_request.app.state.graph
+    config = {"configurable": {"thread_id": session_id}}
+    history = []
+    try:
+        state = await graph.aget_state(config)
+        if state and "messages" in state:
+            for msg in state["messages"]:
+                role = "user" if getattr(msg, "type", "") == "human" else "assistant"
+                content = getattr(msg, "content", "")
+                history.append({"role": role, "content": content})
+    except:
+        pass
+
+    return {"session": sess, "messages": history}
 
 
 @app.delete("/api/sessions/{session_id}")

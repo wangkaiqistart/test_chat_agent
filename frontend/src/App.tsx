@@ -14,8 +14,7 @@ import {
   listSessions,
   createSession,
   deleteSession,
-  getSessionHistory,
-  getOrCreateDefaultSession,
+  getSession,
   sessionToConversation,
 } from './services/sessionApi';
 
@@ -55,32 +54,24 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        // 获取或创建默认会话
-        const defaultSession = await getOrCreateDefaultSession();
+        // 创建新会话（同时返回空历史）
+        const { session: newSession } = await createSession();
         addConversation({
-          key: defaultSession.id,
-          label: defaultSession.title,
+          key: newSession.id,
+          label: newSession.title,
           group: '今天',
         });
-        setActiveConversationKey(defaultSession.id);
+        setActiveConversationKey(newSession.id);
+        setMessages([]);
 
         // 加载完整会话列表
-        const sessions = await loadSessions();
-
-        // 如果默认会话不在列表中，添加它
-        if (!sessions.find(s => s.id === defaultSession.id)) {
-          addConversation({
-            key: defaultSession.id,
-            label: defaultSession.title,
-            group: '今天',
-          });
-        }
+        await loadSessions();
       } catch (error) {
         console.error('初始化失败:', error);
-        // 出错时创建一个本地会话
         const now = Date.now().toString();
         addConversation({ key: now, label: '新会话', group: '今天' });
         setActiveConversationKey(now);
+        setMessages([]);
       }
     };
 
@@ -93,19 +84,24 @@ export default function App() {
 
     const loadHistory = async () => {
       try {
-        const history = await getSessionHistory(activeConversationKey);
-        if (history.length > 0) {
-          const msgs = history.map((msg, idx) => ({
-            id: `${activeConversationKey}-${idx}`,
-            message: {
-              role: msg.role,
-              content: msg.content,
-            },
-            status: 'success' as const,
-          }));
-          setMessages(msgs);
-        } else {
-          setMessages([]);
+        // 从列表中找会话（避免重复请求）
+        const existingConv = conversations.find(c => c.key === activeConversationKey);
+        if (existingConv) {
+          // 已有会话，获取历史
+          const result = await getSession(activeConversationKey);
+          if (result && result.messages.length > 0) {
+            const msgs = result.messages.map((msg, idx) => ({
+              id: `${activeConversationKey}-${idx}`,
+              message: {
+                role: msg.role,
+                content: msg.content,
+              },
+              status: 'success' as const,
+            }));
+            setMessages(msgs);
+          } else {
+            setMessages([]);
+          }
         }
       } catch (error) {
         console.error('加载历史消息失败:', error);
@@ -119,7 +115,7 @@ export default function App() {
   // 新建会话
   const handleNewConversation = async () => {
     try {
-      const newSession = await createSession();
+      const { session: newSession } = await createSession();
       addConversation({
         key: newSession.id,
         label: newSession.title,
@@ -127,6 +123,8 @@ export default function App() {
       });
       setActiveConversationKey(newSession.id);
       setMessages([]);
+      // 刷新列表以保持顺序
+      await loadSessions();
       messageApi.success('已创建新会话');
     } catch (error) {
       console.error('创建会话失败:', error);
@@ -139,14 +137,13 @@ export default function App() {
     try {
       await deleteSession(key);
       removeConversation(key);
+      await loadSessions();
 
-      // 如果删除的是当前会话，切换到第一个
       if (activeConversationKey === key) {
         const remaining = conversations.filter(c => c.key !== key);
         if (remaining.length > 0) {
           setActiveConversationKey(remaining[0].key);
         } else {
-          // 没有会话了，创建新的
           handleNewConversation();
         }
       }

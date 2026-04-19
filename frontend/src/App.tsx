@@ -1,114 +1,81 @@
 /**
- * Multi-Modal Chat — Phase 0 最小可运行版本
- * 功能：文本对话 + SSE 流式输出
+ * Multi-Modal Chat — Phase 1
+ * 设计：简约精致风格，参考 Claude/ChatGPT 极简美学
  */
-import { useState, useRef, useEffect } from 'react'
-import { XProvider, Bubble, Sender } from '@ant-design/x'
+import { message } from 'antd';
+import { useXChat, useXConversations } from '@ant-design/x-sdk';
+import { XProvider } from '@ant-design/x';
 
+import { langGraphProvider, type LangGraphMessage } from './LangGraphProvider';
+import { Sidebar } from './components/Sidebar';
+import { ChatArea } from './components/ChatArea';
+import { PROMPT_ITEMS } from './components/prompts';
+
+// ============ App ============
 export default function App() {
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const conversationId = useRef(`session_${Date.now()}`)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [messageApi, contextHolder] = message.useMessage();
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  // 使用官方 useXConversations 管理会话
+  const {
+    conversations,
+    activeConversationKey,
+    setActiveConversationKey,
+    addConversation,
+  } = useXConversations({
+    defaultConversations: [],
+  });
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  // 使用 useXChat 管理消息
+  const { messages, onRequest, isRequesting, abort } = useXChat<LangGraphMessage>({
+    provider: langGraphProvider as any,
+    conversationKey: activeConversationKey,
+  });
 
-  const handleSubmit = async (value: string) => {
-    if (!value.trim()) return
-
-    const userMessage = { role: 'user', content: value }
-    setMessages(prev => [...prev, userMessage])
-    setInput('')
-    setLoading(true)
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: conversationId.current,
-          message: value,
-          stream_mode: 'messages',
-        }),
-      })
-
-      if (!response.ok) throw new Error('请求失败')
-
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let assistantMessage = ''
-
-      while (reader) {
-        const { done, value: chunk } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(chunk, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (line.startsWith('data:')) {
-            try {
-              const jsonData = JSON.parse(line.slice(5).trim())
-              const content = jsonData.data?.content || jsonData.content || ''
-
-              assistantMessage += content
-              setMessages(prev => {
-                const last = prev[prev.length - 1]
-                if (last?.role === 'assistant') {
-                  return [...prev.slice(0, -1), { role: 'assistant', content: assistantMessage }]
-                }
-                return [...prev, { role: 'assistant', content: assistantMessage }]
-              })
-            } catch {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('SSE 错误:', error)
-      setMessages(prev => [...prev, { role: 'assistant', content: '抱歉，发生了错误。' }])
-    } finally {
-      setLoading(false)
+  // 新建会话
+  const handleNewConversation = () => {
+    if (messages.length === 0) {
+      messageApi.info('当前已是新会话');
+      return;
     }
-  }
+    const now = Date.now().toString();
+    addConversation({
+      key: now,
+      label: `新会话 ${conversations.length + 1}`,
+      group: '今天',
+    });
+    setActiveConversationKey(now);
+  };
+
+  // 提交消息
+  const handleSubmit = (val: string) => {
+    if (!val) return;
+    onRequest({
+      session_id: activeConversationKey,
+      message: val,
+      stream_mode: 'messages',
+    } as any);
+  };
 
   return (
     <XProvider>
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', padding: 24 }}>
-        <h1 style={{ marginBottom: 16 }}>Multi-Modal Chat</h1>
-
-        <div style={{ flex: 1, overflow: 'auto', marginBottom: 16 }}>
-          {messages.map((m, i) => (
-            <Bubble
-              key={i}
-              placement={m.role === 'user' ? 'end' : 'start'}
-              content={m.content}
-            />
-          ))}
-          {loading && (
-            <Bubble placement="start" loading typing={{ step: 1, interval: 50 }} content="" />
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-
-        <Sender
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSubmit}
-          loading={loading}
-          placeholder="输入消息..."
+      {contextHolder}
+      <div className="app-layout">
+        <Sidebar
+          conversations={conversations}
+          activeConversationKey={activeConversationKey}
+          onConversationChange={setActiveConversationKey}
+          onNewConversation={handleNewConversation}
         />
+        <div className="app-chat">
+          <ChatArea
+            messages={messages as any}
+            isRequesting={isRequesting}
+            onSubmit={handleSubmit}
+            onCancel={abort}
+            promptItems={PROMPT_ITEMS}
+          />
+        </div>
       </div>
     </XProvider>
-  )
+  );
 }

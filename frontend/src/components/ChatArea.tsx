@@ -41,6 +41,7 @@ interface MessageItem {
 interface ChatAreaProps {
   messages: MessageItem[];
   isRequesting: boolean;
+  isLoadingHistory?: boolean;
   onSubmit: (val: string) => void;
   onCancel: () => void;
   promptItems: PromptItem[];
@@ -203,6 +204,7 @@ const styles = {
 export const ChatArea: React.FC<ChatAreaProps> = ({
   messages,
   isRequesting,
+  isLoadingHistory,
   onSubmit,
   onCancel,
   promptItems,
@@ -265,7 +267,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       <div className="chat-area" style={styles.chatList} ref={chatListRef}>
         <div style={styles.messageContainer}>
-          {messages?.length ? (
+          {isLoadingHistory ? (
+            // 加载历史消息时的加载效果
+            <Flex vertical align="center" justify="center" style={{ flex: 1, paddingTop: 100 }}>
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: 12,
+                background: `linear-gradient(135deg, ${COLORS.accent}, #34d399)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+              }}>
+                <span style={{ color: '#fff', fontSize: 18, fontWeight: 700 }}>AI</span>
+              </div>
+              <span style={{ color: COLORS.textSecondary, fontSize: 14 }}>加载对话历史...</span>
+            </Flex>
+          ) : messages?.length ? (
             <Bubble.List
               style={styles.bubbleList}
               items={messages.map((i, idx) => {

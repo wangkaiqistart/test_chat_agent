@@ -23,6 +23,7 @@ export default function App() {
 
   // 独立管理历史消息状态
   const [historyMessages, setHistoryMessages] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const {
     conversations,
@@ -79,6 +80,7 @@ export default function App() {
     if (!activeConversationKey) return;
 
     const loadHistory = async () => {
+      setIsLoadingHistory(true);
       try {
         const result = await getSession(activeConversationKey);
         if (result && result.messages.length > 0) {
@@ -99,6 +101,8 @@ export default function App() {
       } catch (error) {
         console.error('加载历史消息失败:', error);
         setHistoryMessages([]);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
 
@@ -162,6 +166,7 @@ export default function App() {
           <ChatArea
             messages={allMessages as any}
             isRequesting={isRequesting}
+            isLoadingHistory={isLoadingHistory}
             onSubmit={handleSubmit}
             onCancel={abort}
             promptItems={PROMPT_ITEMS}

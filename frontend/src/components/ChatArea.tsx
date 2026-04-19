@@ -2,7 +2,7 @@
  * 聊天区域组件
  */
 import React, { useState, useRef, useEffect } from 'react';
-import { Bubble, Sender } from '@ant-design/x';
+import { Bubble, Sender, ThoughtChain } from '@ant-design/x';
 import { Flex, Avatar, Button, message } from 'antd';
 import {
   CopyOutlined,
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 
 import { PromptItem } from './prompts';
+import type { ToolCall } from '../LangGraphProvider';
 
 // ============ 主题色彩（与 App.tsx 同步） ============
 const COLORS = {
@@ -32,6 +33,7 @@ interface MessageItem {
   message: {
     role: 'user' | 'assistant';
     content: string;
+    thoughts?: ToolCall[];
   };
   status?: string;
 }
@@ -266,26 +268,43 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           {messages?.length ? (
             <Bubble.List
               style={styles.bubbleList}
-              items={messages.map((i, idx) => ({
-                role: i.message.role,
-                content: i.message.content,
-                key: i.id || idx,
-                status: i.status,
-                loading: i.status === 'loading',
-                className: 'bubble-item',
-                avatar: i.message.role === 'user' ? (
-                  <Avatar style={{ ...styles.avatar, ...styles.userAvatar }}>U</Avatar>
-                ) : (
-                  <Avatar style={{ ...styles.avatar, ...styles.assistantAvatar }}>AI</Avatar>
-                ),
-                footer: (content: string, info: any) => (
-                  <MessageFooter
-                    content={content}
-                    status={info?.status}
-                    id={info?.key}
-                  />
-                ),
-              }))}
+              items={messages.map((i, idx) => {
+                const thoughts = i.message.thoughts;
+                return {
+                  role: i.message.role,
+                  content: i.message.content,
+                  key: i.id || idx,
+                  status: i.status,
+                  loading: i.status === 'loading',
+                  className: 'bubble-item',
+                  avatar: i.message.role === 'user' ? (
+                    <Avatar style={{ ...styles.avatar, ...styles.userAvatar }}>U</Avatar>
+                  ) : (
+                    <Avatar style={{ ...styles.avatar, ...styles.assistantAvatar }}>AI</Avatar>
+                  ),
+                  // 思维链放在上方
+                  header: thoughts && thoughts.length > 0 ? (
+                    <ThoughtChain
+                      items={thoughts.map((t) => ({
+                        key: t.key,
+                        title: t.title,
+                        description: t.description,
+                        status: t.status === 'loading' ? 'pending' : t.status,
+                        collapsible: true,
+                        defaultExpanded: false,
+                      }))}
+                    />
+                  ) : undefined,
+                  // 操作按钮放在下方
+                  footer: (content: string, info: any) => (
+                    <MessageFooter
+                      content={content}
+                      status={info?.status}
+                      id={info?.key}
+                    />
+                  ),
+                };
+              })}
               roles={{
                 assistant: {
                   placement: 'start',

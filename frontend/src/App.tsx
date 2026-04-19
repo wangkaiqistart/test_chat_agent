@@ -18,6 +18,7 @@ import {
   updateSessionTitle,
   sessionToConversation,
   getLatestSession,
+  getSessionHistory,
 } from './services/sessionApi';
 
 // ============ App ============
@@ -37,7 +38,7 @@ export default function App() {
   });
 
   // 使用 useXChat 管理消息
-  const { messages, onRequest, isRequesting, abort } = useXChat<LangGraphMessage>({
+  const { messages, onRequest, isRequesting, abort, setMessages } = useXChat<LangGraphMessage>({
     provider: langGraphProvider as any,
     conversationKey: activeConversationKey,
   });
@@ -90,9 +91,35 @@ export default function App() {
     initSessions();
   }, []);
 
-  // 切换会话时重置标题更新状态
+  // 切换会话时重置标题更新状态并加载历史消息
   useEffect(() => {
-    setTitleUpdated(false);
+    if (!activeConversationKey) return;
+
+    const loadHistory = async () => {
+      try {
+        const history = await getSessionHistory(activeConversationKey);
+        if (history.length > 0) {
+          // 转换为 MessageItem 格式
+          const msgs = history.map((msg, idx) => ({
+            id: `${activeConversationKey}-${idx}`,
+            message: {
+              role: msg.role,
+              content: msg.content,
+            },
+            status: 'success' as const,
+          }));
+          setMessages(msgs);
+          setTitleUpdated(true); // 有历史消息说明不是新会话
+        } else {
+          setTitleUpdated(false);
+        }
+      } catch (error) {
+        console.error('加载历史消息失败:', error);
+        setTitleUpdated(false);
+      }
+    };
+
+    loadHistory();
   }, [activeConversationKey]);
 
   // 新建会话

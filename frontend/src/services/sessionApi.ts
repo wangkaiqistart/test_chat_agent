@@ -62,6 +62,19 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await fetch(`${API_BASE}/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
+// 历史消息类型
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+// 获取会话历史消息
+export async function getSessionHistory(sessionId: string): Promise<HistoryMessage[]> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/history`);
+  const data = await res.json();
+  return data.messages || [];
+}
+
 // 转换 Session 为 ConversationData 格式
 export function sessionToConversation(session: Session): ConversationData {
   // 根据时间生成 group

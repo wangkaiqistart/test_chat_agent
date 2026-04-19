@@ -157,6 +157,30 @@ async def delete_session(session_id: str):
     return JSONResponse(status_code=404, content={"error": "会话不存在"})
 
 
+@app.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: str, http_request: Request):
+    """获取会话的历史消息"""
+    graph = http_request.app.state.graph
+    config = {"configurable": {"thread_id": session_id}}
+
+    try:
+        # 从 checkpointer 获取历史消息
+        checkpoint = await graph.aget(config)
+        if checkpoint and "messages" in checkpoint:
+            messages = checkpoint["messages"]
+            # 转换为简单格式
+            history = []
+            for msg in messages:
+                role = "user" if getattr(msg, "type", "") == "human" else "assistant"
+                content = getattr(msg, "content", "")
+                history.append({"role": role, "content": content})
+            return {"messages": history}
+        return {"messages": []}
+    except Exception as e:
+        print(f"获取历史消息失败: {e}")
+        return {"messages": []}
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """

@@ -13,10 +13,20 @@ import type { SSEOutput, TransformMessage, XRequestOptions } from '@ant-design/x
 
 // ============ 类型定义 ============
 
+/** 工具调用项（用于 ThoughtChain） */
+export interface ToolCall {
+  key: string;
+  title: string;
+  description: string;
+  status: 'loading' | 'success' | 'error' | 'pending';
+  content?: string;
+}
+
 /** 聊天消息格式 */
 export interface LangGraphMessage {
   role: 'user' | 'assistant';
   content: string;
+  thoughts?: ToolCall[];  // 思维链/工具调用
 }
 
 /** 输入到 onRequest 的参数 */
@@ -30,11 +40,9 @@ export interface LangGraphInput {
 type ChatOutput = SSEOutput;
 
 // ============ 工具调用追踪（模块级别，非并发安全，适合单会话） ============
-let _currentToolCall: {
-  name: string;
-  args: string;
-  results: string[];
-} | null = null;
+let _toolCallKey = 0;
+
+const _genToolKey = () => `tool_${++_toolCallKey}`;
 
 // ============ Provider ============
 
@@ -64,7 +72,7 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
     const rawData = chunk?.data as string | undefined;
 
     // 初始消息
-    let msg: LangGraphMessage = originMessage || { role: 'assistant', content: '' };
+    let msg: LangGraphMessage = originMessage || { role: 'assistant', content: '', thoughts: [] };
 
     // 非 SSE 事件或空数据
     if (!rawData) {
@@ -83,35 +91,45 @@ class LangGraphChatProvider extends AbstractChatProvider<LangGraphMessage, LangG
       if (eventType === 'token' || (!eventType && data.content !== undefined)) {
         const text = data.content || '';
         msg = {
+          ...msg,
           role: 'assistant',
           content: `${msg.content}${text}`,
         };
         return msg;
       }
 
-      // ========== tool_start 事件：记录工具调用信息 ==========
+      // ========== tool_start 事件：添加思维链项 ==========
       if (eventType === 'tool_start') {
-        _currentToolCall = {
-          name: data.tool || '',
-          args: data.input || '',
-          results: [],
+        const thoughts = [...(msg.thoughts || []), {
+          key: _genToolKey(),
+          title: `正在搜索...`,
+          description: '',
+          status: 'loading' as const,
+        }];
+        msg = {
+          ...msg,
+          thoughts,
         };
         return msg;
       }
 
-      // ========== tool_result 事件：追加到消息内容 ==========
+      // ========== tool_result 事件：更新思维链项状态 ==========
       if (eventType === 'tool_result') {
-        const toolName = data.tool || _currentToolCall?.name || '';
-        const toolOutput = data.output || '';
+        const thoughts = [...(msg.thoughts || [])];
 
-        if (_currentToolCall) {
-          _currentToolCall.results.push(toolOutput);
+        // 找到最后一个 loading 状态的思维链项并更新
+        const lastLoadingIndex = thoughts.findIndex(t => t.status === 'loading');
+        if (lastLoadingIndex !== -1) {
+          thoughts[lastLoadingIndex] = {
+            ...thoughts[lastLoadingIndex],
+            title: `搜索完成`,
+            status: 'success',
+          };
         }
 
-        const toolResultText = `\n[${toolName}] 结果: ${toolOutput}\n`;
         msg = {
-          role: 'assistant',
-          content: `${msg.content}${toolResultText}`,
+          ...msg,
+          thoughts,
         };
         return msg;
       }

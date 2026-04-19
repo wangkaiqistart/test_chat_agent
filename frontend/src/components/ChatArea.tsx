@@ -269,15 +269,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             <Bubble.List
               style={styles.bubbleList}
               items={messages.map((i, idx) => {
-                const thoughts = i.message.thoughts;
+                // i 是 LangGraphMessage: { role, content, thoughts }
+                const thoughts = (i as any).thoughts;
                 return {
-                  role: i.message.role,
-                  content: i.message.content,
-                  key: i.id || idx,
-                  status: i.status,
-                  loading: i.status === 'loading',
+                  role: i.role,
+                  content: i.content,
+                  key: (i as any).id || idx,
+                  status: (i as any).status,
+                  loading: (i as any).status === 'loading',
                   className: 'bubble-item',
-                  avatar: i.message.role === 'user' ? (
+                  avatar: i.role === 'user' ? (
                     <Avatar style={{ ...styles.avatar, ...styles.userAvatar }}>U</Avatar>
                   ) : (
                     <Avatar style={{ ...styles.avatar, ...styles.assistantAvatar }}>AI</Avatar>

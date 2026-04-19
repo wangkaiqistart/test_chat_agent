@@ -33,18 +33,33 @@ def init_session_table():
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id VARCHAR(64) PRIMARY KEY,
-                    user_id INT DEFAULT 1001,
-                    title VARCHAR(100) DEFAULT '新会话',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    last_message TEXT,
-                    message_count INT DEFAULT 0,
-                    INDEX idx_user_updated (user_id, updated_at DESC)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            # 检查表是否存在
+            cursor.execute("SHOW TABLES LIKE 'sessions'")
+            table_exists = cursor.fetchone()
+
+            if not table_exists:
+                # 创建新表
+                cursor.execute("""
+                    CREATE TABLE sessions (
+                        id VARCHAR(64) PRIMARY KEY,
+                        user_id INT DEFAULT 1001,
+                        title VARCHAR(100) DEFAULT '新会话',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        last_message TEXT,
+                        message_count INT DEFAULT 0,
+                        INDEX idx_user_updated (user_id, updated_at DESC)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """)
+            else:
+                # 检查并添加 user_id 列
+                cursor.execute("SHOW COLUMNS FROM sessions LIKE 'user_id'")
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN user_id INT DEFAULT 1001 AFTER id")
+                # 检查并添加 message_count 列
+                cursor.execute("SHOW COLUMNS FROM sessions LIKE 'message_count'")
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN message_count INT DEFAULT 0 AFTER last_message")
         conn.commit()
     finally:
         conn.close()

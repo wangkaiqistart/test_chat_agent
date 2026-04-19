@@ -1,7 +1,7 @@
 /**
  * Multi-Modal Chat — Phase 1
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { message } from 'antd';
 import { useXChat, useXConversations } from '@ant-design/x-sdk';
 import { XProvider } from '@ant-design/x';
@@ -21,29 +21,48 @@ import {
 export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
 
+  // 独立管理历史消息状态
+  const [historyMessages, setHistoryMessages] = useState<any[]>([]);
+
   const {
     conversations,
     activeConversationKey,
     setActiveConversationKey,
     addConversation,
-    removeConversation,
     setConversations,
   } = useXConversations({
     defaultConversations: [],
   });
 
-  const { messages, onRequest, isRequesting, abort, setMessages } = useXChat<LangGraphMessage>({
+  const { messages, onRequest, isRequesting, abort } = useXChat<LangGraphMessage>({
     provider: langGraphProvider as any,
     conversationKey: activeConversationKey,
   });
+
+  // 合并历史消息和流式消息
+  const allMessages = [...historyMessages, ...messages];
 
   // 加载会话列表
   const loadSessions = async () => {
     try {
       const sessions = await listSessions();
-      const conversationMetas = sessions.map(sessionToConversation);
-      setConversations(conversationMetas);
-      return sessions;
+      if (sessions.length === 0) {
+        // 没有会话，创建一个
+        const { session: newSession } = await createSession();
+        addConversation({
+          key: newSession.id,
+          label: newSession.title,
+          group: '今天',
+        });
+        setActiveConversationKey(newSession.id);
+        return [newSession];
+      } else {
+        // 有会话，加载列表并激活第一个
+        const conversationMetas = sessions.map(sessionToConversation);
+        setConversations(conversationMetas);
+        setActiveConversationKey(sessions[0].id);
+        return sessions;
+      }
     } catch (error) {
       console.error('加载会话列表失败:', error);
       return [];
@@ -52,30 +71,7 @@ export default function App() {
 
   // 页面加载时初始化
   useEffect(() => {
-    const init = async () => {
-      try {
-        // 创建新会话（同时返回空历史）
-        const { session: newSession } = await createSession();
-        addConversation({
-          key: newSession.id,
-          label: newSession.title,
-          group: '今天',
-        });
-        setActiveConversationKey(newSession.id);
-        setMessages([]);
-
-        // 加载完整会话列表
-        await loadSessions();
-      } catch (error) {
-        console.error('初始化失败:', error);
-        const now = Date.now().toString();
-        addConversation({ key: now, label: '新会话', group: '今天' });
-        setActiveConversationKey(now);
-        setMessages([]);
-      }
-    };
-
-    init();
+    loadSessions();
   }, []);
 
   // 切换会话时加载历史消息
@@ -84,28 +80,25 @@ export default function App() {
 
     const loadHistory = async () => {
       try {
-        // 从列表中找会话（避免重复请求）
-        const existingConv = conversations.find(c => c.key === activeConversationKey);
-        if (existingConv) {
-          // 已有会话，获取历史
-          const result = await getSession(activeConversationKey);
-          if (result && result.messages.length > 0) {
-            const msgs = result.messages.map((msg, idx) => ({
-              id: `${activeConversationKey}-${idx}`,
-              message: {
-                role: msg.role,
-                content: msg.content,
-              },
-              status: 'success' as const,
-            }));
-            setMessages(msgs);
-          } else {
-            setMessages([]);
-          }
+        const result = await getSession(activeConversationKey);
+        if (result && result.messages.length > 0) {
+          // 转换为 ChatArea 期望的格式
+          const msgs = result.messages.map((msg, idx) => ({
+            id: `${activeConversationKey}-${idx}`,
+            message: {
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content,
+              thoughts: [],
+            },
+            status: 'success' as const,
+          }));
+          setHistoryMessages(msgs);
+        } else {
+          setHistoryMessages([]);
         }
       } catch (error) {
         console.error('加载历史消息失败:', error);
-        setMessages([]);
+        setHistoryMessages([]);
       }
     };
 
@@ -116,15 +109,10 @@ export default function App() {
   const handleNewConversation = async () => {
     try {
       const { session: newSession } = await createSession();
-      addConversation({
-        key: newSession.id,
-        label: newSession.title,
-        group: '今天',
-      });
-      setActiveConversationKey(newSession.id);
-      setMessages([]);
-      // 刷新列表以保持顺序
+      // 重新加载列表保持同步
       await loadSessions();
+      setActiveConversationKey(newSession.id);
+      setHistoryMessages([]);  // 清除历史消息
       messageApi.success('已创建新会话');
     } catch (error) {
       console.error('创建会话失败:', error);
@@ -136,17 +124,7 @@ export default function App() {
   const handleDeleteConversation = async (key: string) => {
     try {
       await deleteSession(key);
-      removeConversation(key);
       await loadSessions();
-
-      if (activeConversationKey === key) {
-        const remaining = conversations.filter(c => c.key !== key);
-        if (remaining.length > 0) {
-          setActiveConversationKey(remaining[0].key);
-        } else {
-          handleNewConversation();
-        }
-      }
       messageApi.success('会话已删除');
     } catch (error) {
       console.error('删除会话失败:', error);
@@ -182,7 +160,7 @@ export default function App() {
         />
         <div className="app-chat">
           <ChatArea
-            messages={messages as any}
+            messages={allMessages as any}
             isRequesting={isRequesting}
             onSubmit={handleSubmit}
             onCancel={abort}

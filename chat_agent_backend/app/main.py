@@ -100,12 +100,13 @@ async def create_or_get_session(user_id: int = DEFAULT_USER_ID):
     history = []
     try:
         state = await graph.aget_state(config)
-        if state and "messages" in state:
-            for msg in state["messages"]:
+        if state and state.values and "messages" in state.values:
+            for msg in state.values["messages"]:
                 role = "user" if getattr(msg, "type", "") == "human" else "assistant"
                 content = getattr(msg, "content", "")
                 history.append({"role": role, "content": content})
-    except:
+    except Exception as e:
+        print(f"获取历史消息失败: {e}")
         pass
 
     return {"session": new_session, "messages": history}
@@ -124,12 +125,13 @@ async def get_session_with_history(session_id: str, http_request: Request):
     history = []
     try:
         state = await graph.aget_state(config)
-        if state and "messages" in state:
-            for msg in state["messages"]:
+        if state and state.values and "messages" in state.values:
+            for msg in state.values["messages"]:
                 role = "user" if getattr(msg, "type", "") == "human" else "assistant"
                 content = getattr(msg, "content", "")
                 history.append({"role": role, "content": content})
-    except:
+    except Exception as e:
+        print(f"获取历史消息失败: {e}")
         pass
 
     return {"session": sess, "messages": history}
@@ -152,8 +154,8 @@ async def get_session_history(session_id: str, http_request: Request):
 
     try:
         state = await graph.aget_state(config)
-        if state and "messages" in state:
-            messages = state["messages"]
+        if state and state.values and "messages" in state.values:
+            messages = state.values["messages"]
             history = []
             for msg in messages:
                 role = "user" if getattr(msg, "type", "") == "human" else "assistant"

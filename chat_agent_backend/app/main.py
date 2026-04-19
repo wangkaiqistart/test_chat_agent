@@ -164,10 +164,10 @@ async def get_session_history(session_id: str, http_request: Request):
     config = {"configurable": {"thread_id": session_id}}
 
     try:
-        # 从 checkpointer 获取历史消息
-        checkpoint = await graph.aget(config)
-        if checkpoint and "messages" in checkpoint:
-            messages = checkpoint["messages"]
+        # 从 checkpointer 获取最新状态
+        state = await graph.aget_state(config)
+        if state and "messages" in state:
+            messages = state["messages"]
             # 转换为简单格式
             history = []
             for msg in messages:

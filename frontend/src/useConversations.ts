@@ -2,7 +2,7 @@
  * 会话管理 Hook
  * 管理会话列表的创建、切换、删除（持久化到 localStorage）
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface Conversation {
   key: string;
@@ -35,6 +35,9 @@ export function useConversations() {
     const saved = loadConversations();
     return saved[0]?.key || '';
   });
+
+  // 防止 Strict Mode 下 useEffect 重复执行导致重复创建会话
+  const initRef = useRef(false);
 
   // 持久化
   useEffect(() => {
@@ -77,10 +80,12 @@ export function useConversations() {
 
   // 确保至少有一个会话
   useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
     if (conversations.length === 0) {
       createConversation();
     }
-  }, []);
+  }, [conversations.length]); // 依赖 conversations.length 用于后续创建场景
 
   return {
     conversations,

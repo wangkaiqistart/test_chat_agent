@@ -2,7 +2,7 @@
  * Multi-Modal Chat — Phase 1
  * 设计：简约精致风格，参考 Claude/ChatGPT 极简美学
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { message } from 'antd';
 import { useXChat, useXConversations } from '@ant-design/x-sdk';
 import { XProvider } from '@ant-design/x';
@@ -15,6 +15,7 @@ import {
   listSessions,
   createSession,
   deleteSession,
+  updateSessionTitle,
   sessionToConversation,
   getLatestSession,
 } from './services/sessionApi';
@@ -22,6 +23,7 @@ import {
 // ============ App ============
 export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
+  const [titleUpdated, setTitleUpdated] = useState(false); // 跟踪当前会话标题是否已更新
 
   // 使用官方 useXConversations 管理会话
   const {
@@ -71,6 +73,10 @@ export default function App() {
             group: '今天',
           });
           setActiveConversationKey(newSession.id);
+          setTitleUpdated(false);
+        } else {
+          // 已有会话，重置标题更新状态
+          setTitleUpdated(true);
         }
       } catch (error) {
         console.error('初始化会话失败:', error);
@@ -84,6 +90,11 @@ export default function App() {
     initSessions();
   }, []);
 
+  // 切换会话时重置标题更新状态
+  useEffect(() => {
+    setTitleUpdated(false);
+  }, [activeConversationKey]);
+
   // 新建会话
   const handleNewConversation = async () => {
     try {
@@ -94,6 +105,7 @@ export default function App() {
         group: '今天',
       });
       setActiveConversationKey(newSession.id);
+      setTitleUpdated(false); // 新会话需要更新标题
       messageApi.success('已创建新会话');
     } catch (error) {
       console.error('创建会话失败:', error);
@@ -125,8 +137,20 @@ export default function App() {
   };
 
   // 提交消息
-  const handleSubmit = (val: string) => {
+  const handleSubmit = async (val: string) => {
     if (!val) return;
+
+    // 如果是当前会话的第一条消息，更新会话标题
+    if (!titleUpdated && activeConversationKey) {
+      const newTitle = val.slice(0, 20) + (val.length > 20 ? '...' : '');
+      try {
+        await updateSessionTitle(activeConversationKey, newTitle);
+        setTitleUpdated(true);
+      } catch (e) {
+        console.error('更新标题失败:', e);
+      }
+    }
+
     onRequest({
       session_id: activeConversationKey,
       message: val,

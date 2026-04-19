@@ -9,7 +9,7 @@ Content-Type: application/json
 
 {
   "session_id": "test-session-001",
-  "message": "你好，介绍一下你自己",
+  "message": "查询最新的 ai",
   "stream_mode": "messages"
 }
 

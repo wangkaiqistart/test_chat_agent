@@ -1,8 +1,7 @@
 /**
  * Multi-Modal Chat — Phase 1
- * 设计：简约精致风格，参考 Claude/ChatGPT 极简美学
  */
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { message } from 'antd';
 import { useXChat, useXConversations } from '@ant-design/x-sdk';
 import { XProvider } from '@ant-design/x';
@@ -15,72 +14,69 @@ import {
   listSessions,
   createSession,
   deleteSession,
-  updateSessionTitle,
-  sessionToConversation,
-  getLatestSession,
   getSessionHistory,
+  getOrCreateDefaultSession,
+  sessionToConversation,
 } from './services/sessionApi';
 
-// ============ App ============
 export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
-  const [titleUpdated, setTitleUpdated] = useState(false); // 跟踪当前会话标题是否已更新
 
-  // 使用官方 useXConversations 管理会话
   const {
     conversations,
     activeConversationKey,
     setActiveConversationKey,
     addConversation,
     removeConversation,
+    setConversations,
   } = useXConversations({
     defaultConversations: [],
   });
 
-  // 使用 useXChat 管理消息
   const { messages, onRequest, isRequesting, abort, setMessages } = useXChat<LangGraphMessage>({
     provider: langGraphProvider as any,
     conversationKey: activeConversationKey,
   });
 
-  // 页面加载时：获取会话列表和最新会话
+  // 加载会话列表
+  const loadSessions = async () => {
+    try {
+      const sessions = await listSessions();
+      const conversationMetas = sessions.map(sessionToConversation);
+      setConversations(conversationMetas);
+      return sessions;
+    } catch (error) {
+      console.error('加载会话列表失败:', error);
+      return [];
+    }
+  };
+
+  // 页面加载时初始化
   useEffect(() => {
-    const initSessions = async () => {
+    const init = async () => {
       try {
-        // 获取会话列表
-        const sessions = await listSessions();
-        const conversationMetas = sessions.map(sessionToConversation);
+        // 获取或创建默认会话
+        const defaultSession = await getOrCreateDefaultSession();
+        addConversation({
+          key: defaultSession.id,
+          label: defaultSession.title,
+          group: '今天',
+        });
+        setActiveConversationKey(defaultSession.id);
 
-        // 添加到会话列表
-        for (const meta of conversationMetas) {
-          addConversation(meta);
-        }
+        // 加载完整会话列表
+        const sessions = await loadSessions();
 
-        // 获取最新会话并激活
-        const latest = await getLatestSession();
-        if (latest) {
-          setActiveConversationKey(latest.id);
-        } else if (conversationMetas.length > 0) {
-          // 没有最新会话但有历史会话，激活第一个
-          setActiveConversationKey(conversationMetas[0].key);
-        }
-
-        // 如果没有任何会话，自动创建一个
-        if (conversationMetas.length === 0) {
-          const newSession = await createSession('新会话');
+        // 如果默认会话不在列表中，添加它
+        if (!sessions.find(s => s.id === defaultSession.id)) {
           addConversation({
-            key: newSession.id,
-            label: newSession.title,
+            key: defaultSession.id,
+            label: defaultSession.title,
             group: '今天',
           });
-          setActiveConversationKey(newSession.id);
-          setTitleUpdated(false);
-        } else {
-          // 已有会话，重置标题更新状态
-          setTitleUpdated(true);
         }
       } catch (error) {
-        console.error('初始化会话失败:', error);
+        console.error('初始化失败:', error);
         // 出错时创建一个本地会话
         const now = Date.now().toString();
         addConversation({ key: now, label: '新会话', group: '今天' });
@@ -88,10 +84,10 @@ export default function App() {
       }
     };
 
-    initSessions();
+    init();
   }, []);
 
-  // 切换会话时重置标题更新状态并加载历史消息
+  // 切换会话时加载历史消息
   useEffect(() => {
     if (!activeConversationKey) return;
 
@@ -99,7 +95,6 @@ export default function App() {
       try {
         const history = await getSessionHistory(activeConversationKey);
         if (history.length > 0) {
-          // 转换为 MessageItem 格式
           const msgs = history.map((msg, idx) => ({
             id: `${activeConversationKey}-${idx}`,
             message: {
@@ -109,13 +104,12 @@ export default function App() {
             status: 'success' as const,
           }));
           setMessages(msgs);
-          setTitleUpdated(true); // 有历史消息说明不是新会话
         } else {
-          setTitleUpdated(false);
+          setMessages([]);
         }
       } catch (error) {
         console.error('加载历史消息失败:', error);
-        setTitleUpdated(false);
+        setMessages([]);
       }
     };
 
@@ -125,14 +119,14 @@ export default function App() {
   // 新建会话
   const handleNewConversation = async () => {
     try {
-      const newSession = await createSession('新会话');
+      const newSession = await createSession();
       addConversation({
         key: newSession.id,
         label: newSession.title,
         group: '今天',
       });
       setActiveConversationKey(newSession.id);
-      setTitleUpdated(false); // 新会话需要更新标题
+      setMessages([]);
       messageApi.success('已创建新会话');
     } catch (error) {
       console.error('创建会话失败:', error);
@@ -144,15 +138,15 @@ export default function App() {
   const handleDeleteConversation = async (key: string) => {
     try {
       await deleteSession(key);
-      // 从前端会话列表移除
       removeConversation(key);
-      // 激活其他会话或创建新会话
+
+      // 如果删除的是当前会话，切换到第一个
       if (activeConversationKey === key) {
-        const remaining = conversations.filter((c) => c.key !== key);
+        const remaining = conversations.filter(c => c.key !== key);
         if (remaining.length > 0) {
           setActiveConversationKey(remaining[0].key);
         } else {
-          // 没有会话了，创建新会话
+          // 没有会话了，创建新的
           handleNewConversation();
         }
       }
@@ -163,21 +157,14 @@ export default function App() {
     }
   };
 
+  // 切换会话
+  const handleConversationChange = (key: string) => {
+    setActiveConversationKey(key);
+  };
+
   // 提交消息
-  const handleSubmit = async (val: string) => {
+  const handleSubmit = (val: string) => {
     if (!val) return;
-
-    // 如果是当前会话的第一条消息，更新会话标题
-    if (!titleUpdated && activeConversationKey) {
-      const newTitle = val.slice(0, 20) + (val.length > 20 ? '...' : '');
-      try {
-        await updateSessionTitle(activeConversationKey, newTitle);
-        setTitleUpdated(true);
-      } catch (e) {
-        console.error('更新标题失败:', e);
-      }
-    }
-
     onRequest({
       session_id: activeConversationKey,
       message: val,
@@ -192,7 +179,7 @@ export default function App() {
         <Sidebar
           conversations={conversations}
           activeConversationKey={activeConversationKey}
-          onConversationChange={setActiveConversationKey}
+          onConversationChange={handleConversationChange}
           onNewConversation={handleNewConversation}
           onDeleteConversation={handleDeleteConversation}
         />

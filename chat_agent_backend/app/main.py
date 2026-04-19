@@ -6,7 +6,6 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-# 抑制 aiomysql 表已存在的警告
 logging.getLogger("aiomysql").setLevel(logging.ERROR)
 
 from fastapi import FastAPI, Request
@@ -17,6 +16,8 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.graph import build_graph
 from app import session as session_db
+
+DEFAULT_USER_ID = 1001  # 暂时写死的用户 ID
 
 
 # ============ API Models ============
@@ -31,22 +32,12 @@ class CommandRequest(BaseModel):
     command: dict
 
 
-class CreateSessionRequest(BaseModel):
-    title: str = "新会话"
-
-
-class UpdateTitleRequest(BaseModel):
-    title: str
-
-
 # ============ FastAPI App ============
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """异步 lifespan — 在这里初始化 graph（因为需要 event loop）"""
     use_mysql = os.environ.get("USE_MYSQL_CHECKPOINTER", "true").lower() == "true"
 
     if use_mysql:
-        # 方式一：使用 MySQL Checkpointer + Store（异步版本）
         from app.graph import create_mysql_checkpointer, create_mysql_store
         checkpointer = create_mysql_checkpointer()
         async with checkpointer as cp:
@@ -55,32 +46,20 @@ async def lifespan(app: FastAPI):
                 await cp.setup()
                 await s.setup()
                 app.state.graph = build_graph(checkpointer=cp, store=s)
-                print("✅ MySQL Checkpointer 初始化成功")
-                print("✅ MySQL Store 初始化成功")
                 session_db.init_session_table()
-                print("✅ 会话表初始化成功")
-                print("🚀 Backend Phase 1 启动成功 — Tool Calling enabled")
+                print("✅ 初始化完成")
                 yield
-        print("👋 Backend 关闭")
     else:
-        # 方式二：开发环境使用 MemorySaver + InMemoryStore
         checkpointer = MemorySaver()
         from langgraph.store.memory import InMemoryStore
         store = InMemoryStore()
-        print("⚠️  使用 MemorySaver + InMemoryStore（开发模式）")
         app.state.graph = build_graph(checkpointer=checkpointer, store=store)
-        print("🚀 Backend Phase 1 启动成功 — Tool Calling enabled")
+        print("⚠️  开发模式")
         yield
-        print("👋 Backend 关闭")
 
 
-app = FastAPI(
-    title="Multi-Modal Chat API",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="Multi-Modal Chat API", version="0.1.0", lifespan=lifespan)
 
-# CORS 允许前端跨域
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -90,9 +69,7 @@ app.add_middleware(
 )
 
 
-# ============ SSE Event Formatter ============
 def format_sse_event(event_type: str, data: dict) -> str:
-    """将事件格式化为 SSE 格式"""
     import json
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
@@ -100,56 +77,43 @@ def format_sse_event(event_type: str, data: dict) -> str:
 # ============ API Endpoints ============
 @app.get("/api/health")
 async def health():
-    """健康检查"""
-    return {"status": "ok", "version": "0.1.0", "phase": "phase1"}
+    return {"status": "ok", "version": "0.1.0"}
 
 
-# ============ 会话管理 API ============
 @app.get("/api/sessions")
-async def list_sessions(limit: int = 50, offset: int = 0):
+async def list_sessions(user_id: int = DEFAULT_USER_ID):
     """获取会话列表（按修改时间倒序）"""
-    sessions = session_db.list_sessions(limit=limit, offset=offset)
-    return {"sessions": sessions, "total": len(sessions)}
+    sessions = session_db.list_sessions(user_id=user_id)
+    return {"sessions": sessions}
 
 
 @app.post("/api/sessions")
-async def create_session(req: CreateSessionRequest):
+async def create_session(user_id: int = DEFAULT_USER_ID):
     """创建新会话"""
     import uuid
     session_id = f"session_{uuid.uuid4().hex[:12]}"
-    new_session = session_db.create_session(session_id, req.title)
+    new_session = session_db.create_session(session_id, user_id, "新会话")
     return {"session": new_session}
 
 
-@app.get("/api/sessions/latest")
-async def get_latest_session():
-    """获取最后一次更新的会话"""
-    latest = session_db.get_latest_session()
-    if latest:
-        return {"session": latest}
-    return {"session": None}
+@app.get("/api/sessions/default")
+async def get_or_create_default_session(user_id: int = DEFAULT_USER_ID):
+    """获取或创建默认会话（新用户进入页面时调用）"""
+    session = session_db.get_or_create_default_session(user_id)
+    return {"session": session}
 
 
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str):
-    """获取单个会话"""
+    """获取单个会话详情"""
     sess = session_db.get_session(session_id)
     if sess:
         return {"session": sess}
     return JSONResponse(status_code=404, content={"error": "会话不存在"})
 
 
-@app.patch("/api/sessions/{session_id}/title")
-async def update_session_title(session_id: str, req: UpdateTitleRequest):
-    """更新会话标题"""
-    updated = session_db.update_session_title(session_id, req.title)
-    if updated:
-        return {"session": updated}
-    return JSONResponse(status_code=404, content={"error": "会话不存在"})
-
-
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user_id: int = DEFAULT_USER_ID):
     """删除会话"""
     success = session_db.delete_session(session_id)
     if success:
@@ -164,11 +128,9 @@ async def get_session_history(session_id: str, http_request: Request):
     config = {"configurable": {"thread_id": session_id}}
 
     try:
-        # 从 checkpointer 获取最新状态
         state = await graph.aget_state(config)
         if state and "messages" in state:
             messages = state["messages"]
-            # 转换为简单格式
             history = []
             for msg in messages:
                 role = "user" if getattr(msg, "type", "") == "human" else "assistant"
@@ -181,10 +143,18 @@ async def get_session_history(session_id: str, http_request: Request):
         return {"messages": []}
 
 
+def generate_title(user_message: str, assistant_response: str) -> str:
+    """根据对话生成标题（取用户问题的前30个字符）"""
+    title = user_message[:30]
+    if len(user_message) > 30:
+        title += "..."
+    return title
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request):
     """
-    流式对话接口 — Phase 1
+    流式对话接口
     支持 Tool Calling，通过 SSE 输出 token
     """
     graph = http_request.app.state.graph
@@ -194,11 +164,10 @@ async def chat(request: ChatRequest, http_request: Request):
         from langchain_core.messages import HumanMessage
         messages = [HumanMessage(content=request.message)]
 
-        # 确保会话存在
-        session_db.create_session(request.session_id, "新会话")
+        # 更新会话最后消息（会在完成后更新标题）
+        session_db.update_session(request.session_id, last_message=request.message)
 
-        # 更新会话的最后消息
-        session_db.update_session_message(request.session_id, request.message)
+        full_response = []  # 收集 AI 回复用于生成标题
 
         if request.stream_mode == "messages":
             async for event in graph.astream_events(
@@ -212,6 +181,7 @@ async def chat(request: ChatRequest, http_request: Request):
                     chunk = event.get("data", {}).get("chunk", {})
                     content = getattr(chunk, "content", "")
                     if content:
+                        full_response.append(content)
                         yield format_sse_event("token", {"content": content})
 
                 elif event_type == "on_tool_start":
@@ -235,7 +205,12 @@ async def chat(request: ChatRequest, http_request: Request):
                 config=config
             )
             final_message = result["messages"][-1]
+            full_response.append(final_message.content)
             yield format_sse_event("message", {"content": final_message.content})
+
+        # 生成标题并更新会话
+        title = generate_title(request.message, "".join(full_response))
+        session_db.update_session(request.session_id, title=title, last_message=request.message)
 
         yield format_sse_event("done", {"type": "done"})
 
@@ -253,10 +228,9 @@ async def chat(request: ChatRequest, http_request: Request):
 @app.post("/api/chat/command")
 async def chat_command(request: CommandRequest):
     """Human-in-the-loop 恢复接口（Phase 2）"""
-    return JSONResponse({"status": "not_implemented", "message": "interrupt 功能 Phase 2 再接入"})
+    return JSONResponse({"status": "not_implemented"})
 
 
-# ============ Run ============
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

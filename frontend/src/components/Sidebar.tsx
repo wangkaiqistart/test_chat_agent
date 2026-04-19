@@ -2,8 +2,8 @@
  * 侧边栏组件
  */
 import React from 'react';
-import { Conversations } from '@ant-design/x';
-import { Button, Typography } from 'antd';
+import { Button, Typography, Popconfirm } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
 
@@ -23,11 +23,19 @@ const COLORS = {
 };
 
 // ============ 类型定义 ============
+interface ConversationItem {
+  key: string;
+  label?: string;
+  group?: string;
+  timestamp?: number;
+}
+
 interface SidebarProps {
-  conversations: any[];
+  conversations: ConversationItem[];
   activeConversationKey: string;
   onConversationChange: (key: string) => void;
   onNewConversation: () => void;
+  onDeleteConversation: (key: string) => void;
 }
 
 // ============ 组件样式 ============
@@ -90,6 +98,50 @@ const styles = {
     padding: '0 8px',
   },
 
+  sessionGroup: {
+    fontSize: 12,
+    fontWeight: 500,
+    color: COLORS.textTertiary,
+    padding: '12px 12px 6px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+
+  sessionItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 12px',
+    borderRadius: 8,
+    cursor: 'pointer',
+    marginBottom: 2,
+    transition: 'all 0.15s ease',
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+
+  sessionItemActive: {
+    background: COLORS.bgPrimary,
+    color: COLORS.textPrimary,
+    fontWeight: 500,
+    boxShadow: `0 1px 3px ${COLORS.shadow}`,
+  },
+
+  sessionLabel: {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+
+  deleteBtn: {
+    opacity: 0,
+    color: COLORS.textTertiary,
+    fontSize: 12,
+    padding: 4,
+    height: 'auto',
+  },
+
   sideFooter: {
     padding: '12px 16px',
     borderTop: `1px solid ${COLORS.border}`,
@@ -104,12 +156,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeConversationKey,
   onConversationChange,
   onNewConversation,
+  onDeleteConversation,
 }) => {
+  // 按 group 分组
+  const groups: Record<string, ConversationItem[]> = {};
+  for (const conv of conversations) {
+    const group = conv.group || '更早';
+    if (!groups[group]) groups[group] = [];
+    groups[group].push(conv);
+  }
+
+  // group 排序
+  const groupOrder = ['今天', '昨天', '本周', '更早'];
+  const sortedGroups = Object.keys(groups).sort((a, b) => {
+    const ai = groupOrder.indexOf(a);
+    const bi = groupOrder.indexOf(b);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+
   return (
     <div style={styles.side} className="sidebar">
       <style>{`
         .sidebar::-webkit-scrollbar { display: none; }
         .sidebar:hover .new-chat-btn { background: ${COLORS.bgTertiary}; color: ${COLORS.textPrimary}; border-color: ${COLORS.textTertiary}; }
+        .session-item:hover .delete-btn { opacity: 1; }
+        .session-item:hover .delete-btn:hover { color: #ff4d4f; }
       `}</style>
 
       {/* Logo */}
@@ -129,15 +200,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* 会话列表 */}
       <div style={styles.conversationsWrapper}>
-        <Conversations
-          items={conversations.map((c) => ({
-            key: c.key,
-            label: c.label,
-            timestamp: c.timestamp,
-          }))}
-          activeKey={activeConversationKey}
-          onActiveChange={onConversationChange}
-        />
+        {sortedGroups.map((group) => (
+          <div key={group}>
+            <div style={styles.sessionGroup}>{group}</div>
+            {groups[group].map((conv) => {
+              const isActive = conv.key === activeConversationKey;
+              return (
+                <div
+                  key={conv.key}
+                  className="session-item"
+                  style={{
+                    ...styles.sessionItem,
+                    ...(isActive ? styles.sessionItemActive : {}),
+                  }}
+                  onClick={() => onConversationChange(conv.key)}
+                >
+                  <span style={styles.sessionLabel}>{conv.label}</span>
+                  <Popconfirm
+                    title="删除会话"
+                    description="确定要删除这个会话吗？"
+                    onConfirm={(e) => {
+                      e?.stopPropagation();
+                      onDeleteConversation(conv.key);
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <Button
+                      className="delete-btn"
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      size="small"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* 空状态 */}
+        {conversations.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', color: COLORS.textTertiary, fontSize: 13 }}>
+            暂无会话记录
+          </div>
+        )}
       </div>
 
       {/* 底部信息 */}

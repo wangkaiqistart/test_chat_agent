@@ -14,6 +14,7 @@ import { PROMPT_ITEMS } from './components/prompts';
 import {
   listSessions,
   createSession,
+  deleteSession,
   sessionToConversation,
   getLatestSession,
 } from './services/sessionApi';
@@ -99,6 +100,27 @@ export default function App() {
     }
   };
 
+  // 删除会话
+  const handleDeleteConversation = async (key: string) => {
+    try {
+      await deleteSession(key);
+      // 激活其他会话或创建新会话
+      if (activeConversationKey === key) {
+        const remaining = conversations.filter((c) => c.key !== key);
+        if (remaining.length > 0) {
+          setActiveConversationKey(remaining[0].key);
+        } else {
+          // 没有会话了，创建新会话
+          handleNewConversation();
+        }
+      }
+      messageApi.success('会话已删除');
+    } catch (error) {
+      console.error('删除会话失败:', error);
+      messageApi.error('删除会话失败');
+    }
+  };
+
   // 提交消息
   const handleSubmit = (val: string) => {
     if (!val) return;
@@ -118,6 +140,7 @@ export default function App() {
           activeConversationKey={activeConversationKey}
           onConversationChange={setActiveConversationKey}
           onNewConversation={handleNewConversation}
+          onDeleteConversation={handleDeleteConversation}
         />
         <div className="app-chat">
           <ChatArea
